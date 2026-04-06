@@ -1,154 +1,85 @@
-<div align="center">
+# Phantun WireGuard Docker
 
-# 🌐 Phantun WireGuard Docker
+## 项目简介
 
-**Enterprise-Grade Cross-Border VPN Solution**
+基于 **WireGuard + Phantun + Docker** 构建的企业级跨国异地组网方案，解决 UDP 被运营商拦截、跨国丢包、频繁断连等问题。
 
-[![WireGuard](https://img.shields.io/badge/WireGuard-Latest-brightgreen?logo=wireguard&logoColor=white)](https://www.wireguard.com/)
-[![Docker](https://img.shields.io/badge/Docker-Containerized-blue?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Phantun](https://img.shields.io/badge/Phantun-UDP%20over%20TCP-orange)](https://github.com/dndx/phantun)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+## 解决的问题
 
-</div>
+| 问题 | 解决方案 |
+|:-----|:---------|
+| UDP 被运营商拦截 | Phantun 将 UDP 封装为 TCP 443 |
+| 连接成功率 ≤50% | 实现 **100%** 连通率 |
+| 延迟高 (200ms+) | 优化至 **45-60ms** |
+| 频繁断连 | 容器自动重启，7×24小时稳定运行 |
 
----
+## 技术架构
 
-## Overview
-
-A production-ready **cross-border networking solution** that solves UDP blocking, packet loss, and connection instability issues in international VPN scenarios. Built with **WireGuard + Phantun + Docker** for enterprise deployment.
-
-### 🎯 Problem Solved
-
-| Challenge | Solution |
-|:----------|:---------|
-| UDP blocked by ISP | Phantun encapsulates UDP → TCP 443 |
-| Connection success rate ≤50% | Achieved **100%** connectivity |
-| High latency (200ms+) | Optimized to **45-60ms** |
-| Frequent disconnections | Container auto-restart, 7×24h stable |
-
----
-
-## Architecture
-
-**Core Concept: Dual-container shared network namespace + TCP encapsulation**
+**核心原理：双容器共享网络命名空间 + TCP 封装 WireGuard 流量**
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        North America Client                              │
-│                                                                          │
-│   WireGuard ──(UDP 51820)──► Phantun Client ──(TCP 443)──► Internet    │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    │ TCP 443
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          Internet (Cross-border)                         │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      Shanghai HQ (Docker Host)                           │
-│                                                                          │
-│   ┌─────────────────────────────────────────────────────────────────┐   │
-│   │              Shared Network Namespace (127.0.0.1)                │   │
-│   │                                                                  │   │
-│   │  ┌────────────────┐              ┌────────────────┐             │   │
-│   │  │ Phantun Server │   (UDP)      │ wg-access-server│             │   │
-│   │  │   Port 443     │ ──────────► │   Port 51820    │             │   │
-│   │  │  (TCP → UDP)   │  127.0.0.1   │  (Decrypt)      │             │   │
-│   │  └────────────────┘              └───────┬────────┘             │   │
-│   └──────────────────────────────────────────┼──────────────────────┘   │
-│                                              │                           │
-│                                    ┌─────────┴─────────┐                │
-│                                    │  Web Management   │                │
-│                                    │    Port 8888      │                │
-│                                    └───────────────────┘                │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                         ┌──────────────────┐
-                         │  Internal LAN    │
-                         │ 192.168.0.0/24   │
-                         └──────────────────┘
+美国客户端：WireGuard → Phantun 客户端（UDP→TCP）→ 公网（TCP 443）
+国内服务端：Phantun 服务端（TCP→UDP）→ WireGuard → 公司内网
 ```
 
----
+## 核心组件
 
-## Tech Stack
+| 组件 | 作用 | 部署位置 |
+|:-----|:-----|:---------|
+| wg-access-server | WireGuard 服务端 + Web 管理界面 | Docker 容器 A（国内） |
+| Phantun 服务端 | TCP 流量解封装回 UDP | Docker 容器 B（国内） |
+| Phantun 客户端 | WireGuard UDP 流量封装为 TCP | 美国客户端 |
+| FortiGate 防火墙 | 仅放行 TCP 443 和 8888 | 公司网络边界 |
 
-| Component | Technology | Purpose |
-|:----------|:-----------|:--------|
-| VPN Tunnel | WireGuard | High-speed encrypted tunnel |
-| Protocol Conversion | Phantun | UDP → TCP to bypass ISP blocking |
-| Containerization | Docker | Production deployment, auto-restart |
-| Management | wg-access-server | Web UI, multi-client auth |
-| Security | FortiGate | Firewall, IP whitelist |
+## 端口规划
 
----
+| 端口 | 协议 | 用途 | 暴露范围 |
+|:-----|:-----|:-----|:---------|
+| 443 | TCP | 公网隧道入口（伪装 HTTPS） | 全球可访问 |
+| 8888 | TCP | Web 管理界面 | 公司内网 |
+| 51820 | UDP | 容器内部 WireGuard 通信 | 仅本地回环 |
 
-## Port Configuration
-
-| Port | Protocol | Purpose | Exposure |
-|:-----|:---------|:--------|:---------|
-| **443** | TCP | Public tunnel entry (disguised as HTTPS) | Global |
-| **8888** | TCP | Web management interface | Internal only |
-| **51820** | UDP | WireGuard internal communication | Localhost only (127.0.0.1) |
-
----
-
-## Traffic Flow
+## 流量路径
 
 ```
-North America Office PC
-    │
-    ▼ (WireGuard generates UDP 51820 traffic)
-Phantun Client (UDP → TCP encapsulation)
-    │
-    ▼ (TCP 443 packet, destination: 222.71.32.173:443)
-═══════════════════════════════════════
-           Internet (Cross-border)
-═══════════════════════════════════════
-    │
-    ▼
-FortiGate Firewall (allow TCP 443)
-    │
-    ▼
-Docker Host (222.71.32.173)
-    │
-    ▼
-Container B (phantun-server) listening on 0.0.0.0:443
-    │  Decapsulates TCP → UDP, target: 127.0.0.1:51820
-    ▼ (Shared network namespace, localhost)
-Container A (wg-access-server) listening on 127.0.0.1:51820
-    │  Decrypts WireGuard traffic
-    ▼
-Internal LAN Resources
+美国办公电脑
+    ↓ (WireGuard 产生 UDP 51820 流量)
+Phantun 客户端（UDP → TCP 封装）
+    ↓ (TCP 443 包)
+═══════════════════════════════════
+           互联网（跨国）
+═══════════════════════════════════
+    ↓
+FortiGate 防火墙（放行 TCP 443）
+    ↓
+Docker 宿主服务器
+    ↓
+Phantun 服务端（TCP → UDP 解封装）
+    ↓ (共享网络命名空间，127.0.0.1)
+wg-access-server（解密 WireGuard 流量）
+    ↓
+公司内网资源
 ```
 
----
+## 方案迭代历程
 
-## Solution Evolution (6 Iterations)
+| 版本 | 技术方案 | 协议 | 成功率 | 问题 |
+|:-----|:---------|:-----|:-------|:-----|
+| 一 | WireGuard + Mimic（MT3000） | UDP | ≤50% | UDP 穿透差 |
+| 二 | WireGuard + UDPTunnel | UDP | ≤70% | 仍受 UDP 限制 |
+| 三 | WireGuard + Phantun（MT3000） | TCP | 100% | 路由器性能差 |
+| 四 | 单容器 wg-access-server | UDP | ≤60% | UDP 被封杀 |
+| 五 | 单容器（优化端口） | UDP | ≤75% | 无法突破 UDP 问题 |
+| **六** | **双容器（WG + Phantun）** | **TCP** | **100%** | ✅ 最终方案 |
 
-| Version | Approach | Protocol | Success Rate | Issue |
-|:--------|:---------|:---------|:-------------|:------|
-| v1 | WireGuard + Mimic (MT3000) | UDP | ≤50% | Poor UDP penetration, dynamic IP |
-| v2 | WireGuard + UDPTunnel | UDP | ≤70% | Still UDP limited |
-| v3 | WireGuard + Phantun (MT3000) | TCP | 100% | Router performance, not enterprise-ready |
-| v4 | Single wg-access-server | UDP | ≤60% | Pure UDP blocked by ISP |
-| v5 | Single container (port 52000) | UDP | ≤75% | Cannot solve UDP本质问题 |
-| **v6** | **Dual Container (WG + Phantun)** | **TCP** | **100%** | ✅ Final solution |
+**关键转折：从"优化 UDP"转向"TCP 封装"**
 
-**Key Insight:** Shift from "optimizing UDP" to "TCP encapsulation" using Phantun.
+## 快速部署
 
----
-
-## Quick Start
-
-### Server Side (Shanghai HQ)
+### 服务端（上海总部）
 
 ```bash
-# 1. Start WireGuard container
+# 启动 WireGuard 容器
 docker run -d \
   --name wg-access-server \
   --restart always \
@@ -161,7 +92,7 @@ docker run -d \
   -e WG_VPN_CIDR=10.8.0.0/24 \
   weejewel/wg-access-server
 
-# 2. Start Phantun container (shared network namespace)
+# 启动 Phantun 容器（共享网络命名空间）
 docker run -d \
   --name phantun-server \
   --restart always \
@@ -171,13 +102,13 @@ docker run -d \
   phantun-server -l 0.0.0.0:443 -r 127.0.0.1:51820 -k "your_key" --mtu 1400
 ```
 
-### Client Side (North America)
+### 客户端（北美）
 
 ```bash
-# 1. Run Phantun client
+# 运行 Phantun 客户端
 phantun-client -l 127.0.0.1:51820 -r YOUR_SERVER_IP:443 -k "your_key"
 
-# 2. Configure WireGuard
+# WireGuard 配置
 [Interface]
 PrivateKey = <your-private-key>
 Address = 10.8.0.2/24
@@ -190,94 +121,60 @@ AllowedIPs = 192.168.0.0/24, 10.8.0.0/24
 PersistentKeepalive = 20
 ```
 
----
+## 性能指标
 
-## Performance Metrics
+| 指标 | 数值 |
+|:-----|:-----|
+| 连通率 | 100% |
+| 延迟 | 45-60ms |
+| 丢包率 | ≤0.05% |
+| 运行时间 | 7×24小时连续 |
 
-| Metric | Value |
-|:-------|:------|
-| **Connectivity** | 100% |
-| **Latency** | 45-60ms |
-| **Packet Loss** | ≤0.05% |
-| **Uptime** | 7×24h continuous |
-| **Bandwidth** | Supports test data, web tools, file transfer |
+## 项目成果
 
----
+### 业务成果
+- 北美测试人员可 7×24 小时稳定访问内网，效率提升 30%
+- 光模块测试可视化 Web 工具跨网使用率 100%
+- 相比商业 VPN 方案，年节省授权费用约 8 万元
 
-## Project Outcomes
+### 技术成果
+- 形成可复用的企业级跨国组网模板
+- 输出《部署手册》《排查手册》《扩展指南》3 份文档
+- 验证了"TCP 封装解决 UDP 限制""双容器共享网络栈"等关键技术
 
-### Business Impact
-- ✅ North America team can access internal network **7×24h** stable
-- ✅ Productivity improved by **30%**
-- ✅ Optical module test visualization web tool: **100%** cross-network usage
-- ✅ Annual savings: **~80,000 CNY** vs commercial VPN solutions
+### 安全合规
+- 双重加密：Phantun 传输加密 + WireGuard 隧道加密
+- 防火墙严格限制源地址与端口
+- 通过内部安全合规审核
 
-### Technical Deliverables
-- ✅ Reusable enterprise cross-border networking template
-- ✅ 3 documents archived: Deployment Manual, Troubleshooting Guide, Extension Guide
-- ✅ Validated key techniques: TCP encapsulation, dual-container shared network stack
+## 经验总结
 
-### Security & Compliance
-- ✅ Dual encryption: Phantun transport + WireGuard tunnel
-- ✅ Firewall strict source/port restrictions
-- ✅ Passed internal security compliance audit
+### 技术选型
+- 先用轻量载体（MT3000）快速验证假设，再投入容器化
 
----
+### 跨国组网避坑
+- 避免依赖 UDP，优先 TCP 封装或成熟 VPN 协议
+- 对外暴露常用端口（443、8888）降低拦截概率
+- 容器化部署优先于硬件部署
 
-## Key Learnings
+## 后续扩展
 
-### Technology Selection
-- Use lightweight carriers (MT3000) for rapid hypothesis validation, then invest in containerization
+- 多出口冗余：增加备用公网线路 + DNS 轮询
+- 集群高可用：多节点 + Keepalived VIP
+- 监控告警：Prometheus + Grafana、ELK 日志分析
+- 权限管理：RBAC 角色权限、操作审计
 
-### Cross-border Networking Best Practices
-- Avoid relying on UDP; prioritize TCP encapsulation or mature VPN protocols
-- Expose common ports (443, 8888) to reduce blocking probability
-- Containerized deployment preferred over hardware deployment
+## 适用场景
 
-### Project Management
-- Small iterative steps
-- Strengthen cross-team collaboration
-- Emphasize documentation output
+- 企业总部 ↔ 海外分公司互联
+- 跨国研发、测试、办公组网
+- UDP 被限制、传统 VPN 不稳定环境
+- 中小规模企业生产环境
 
----
+## 项目角色
 
-## Future Roadmap
-
-- [ ] Multi-path redundancy (backup public line + DNS round-robin)
-- [ ] High availability cluster (multi-node + Keepalived VIP)
-- [ ] Enhanced monitoring (Prometheus + Grafana, ELK logging)
-- [ ] RBAC permission control, operation audit, automatic key rotation
+架构设计、容器部署、端口规划、网络调试与外网连通性验证
 
 ---
 
-## Use Cases
-
-- 🏢 **Enterprise HQ ↔ Overseas Branch** connectivity
-- 🔬 **Cross-border R&D** and testing
-- 🚫 **UDP-restricted environments** (ISP blocking)
-- ⚡ **Low-latency requirements** (< 100ms)
-- 🏭 **SMB production environments**
-
----
-
-## Team
-
-| Role | Responsibility |
-|:-----|:---------------|
-| Network Architect | Architecture design, container deployment, port planning, network debugging, connectivity verification |
-
----
-
-## License
-
-MIT License
-
----
-
-<div align="center">
-
-**Shanghai Beipu Semiconductor Technology Co., Ltd.**
-
-*Secure · Fast · Reliable Cross-Border Networking*
-
-</div>
+**上海孛璞半导体技术有限公司**
